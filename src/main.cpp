@@ -16,10 +16,17 @@ GreeYACHeatpumpIR *heatpumpIR;
 unsigned long DELAY_TIME = 60 * 1000; // 1 minute
 unsigned long delayStart = 0;         // the time the delay started
 
+static const int numReadings = 5;
+float readings[numReadings];      // the readings from the analog input
+int readIndex = 0;              // the index of the current reading
+int readCount = 0;
+float total = 0;                  // the running total
+float average = 0;                // the average
+
 void setup()
 {
   // put your setup code here, to run once:
-  Serial.begin(9600);
+  Serial.begin(115200);
   delay(500);
 
   Serial.print(F("Setting up WiFi"));
@@ -41,7 +48,7 @@ void setup()
 
   Serial.println(F("Starting HTTP OTA service"));
   server.on("/", []() {
-    server.send(200, "text/plain", F("Meow meow meow meow meow meow meow meow meow meow."));
+    server.send(200, "text/plain", F("Temperature sender for Gree I-Feel devices."));
   });
 
   ElegantOTA.begin(&server);
@@ -50,7 +57,12 @@ void setup()
   heatpumpIR = new GreeYACHeatpumpIR();
   Serial.println(F("Starting IR Sensor"));
 
-  delayStart = millis();
+  delayStart = 0;
+  readCount = 0;
+  for (int thisReading = 0; thisReading < numReadings; thisReading++)
+  {
+    readings[thisReading] = 0;
+  }
 }
 
 void loop()
@@ -60,19 +72,31 @@ void loop()
 
   if ((millis() - delayStart) >= DELAY_TIME)
   {
-    delayStart += DELAY_TIME; // this prevents drift in the delays
     if (sht30.get() == 0)
     {
+      delayStart += DELAY_TIME; // this prevents drift in the delays
+
       Serial.print("Temperature in Celsius : ");
       Serial.println(sht30.cTemp);
       Serial.print("Relative Humidity : ");
       Serial.println(sht30.humidity);
-      Serial.println();
 
-      Serial.println(F("Sending IR for current temperature"));
-      heatpumpIR->send(irSender, uint8_t(sht30.cTemp - 1.0));
+      total = total - readings[readIndex];
+      readings[readIndex] = sht30.cTemp;
+      total = total + readings[readIndex];
+      readIndex = (readIndex + 1) % numReadings;
+      int count = min(++readCount, numReadings);
+      readCount = count;
+
+      // calculate the average:
+      average = total / (float)readCount;
+
+      uint8_t rounded = round(average);
+      Serial.print(F("Sending IR for current temperature : "));
+      Serial.println(rounded);
+      heatpumpIR->send(irSender, rounded);
     }
   }
 
-  delay(5000);
+  delay(10);
 }
